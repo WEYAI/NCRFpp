@@ -5,9 +5,16 @@
 # @Last Modified time: 2019-01-25 20:25:59
 from __future__ import print_function
 from __future__ import absolute_import
+import argparse
 import sys
-from .alphabet import Alphabet
-from .functions import *
+import os
+import torch
+os.chdir(sys.path[0])
+sys.path.append("../../")
+sys.path.append("../../../")
+sys.path.append("../")
+from utils.alphabet import Alphabet
+from utils.functions import *
 
 try:
     import cPickle as pickle
@@ -183,6 +190,7 @@ class Data:
 
 
     def initial_feature_alphabets(self):
+        # 
         if self.sentence_classification:
             ## if sentence classification data format, splited by '\t'
             items = open(self.train_dir,'r').readline().strip('\n').split('\t')
@@ -285,6 +293,7 @@ class Data:
         if self.word_emb_dir:
             print("Load pretrained word embedding, norm: %s, dir: %s"%(self.norm_word_emb, self.word_emb_dir))
             self.pretrain_word_embedding, self.word_emb_dim = build_pretrain_embedding(self.word_emb_dir, self.word_alphabet, self.word_emb_dim, self.norm_word_emb)
+            pass
         if self.char_emb_dir:
             print("Load pretrained char embedding, norm: %s, dir: %s"%(self.norm_char_emb, self.char_emb_dir))
             self.pretrain_char_embedding, self.char_emb_dim = build_pretrain_embedding(self.char_emb_dir, self.char_alphabet, self.char_emb_dim, self.norm_char_emb)
@@ -585,3 +594,76 @@ def str2bool(string):
         return True
     else:
         return False
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description='Tuning with NCRF++')
+    # parser.add_argument('--status', choices=['train', 'decode'], help='update algorithm', default='train')
+    parser.add_argument('--config',  help='Configuration File', default='None')
+    parser.add_argument('--wordemb',  help='Embedding for words', default='None')
+    parser.add_argument('--charemb',  help='Embedding for chars', default='None')
+    parser.add_argument('--status', choices=['train', 'decode'], help='update algorithm', default='train')
+    parser.add_argument('--savemodel', default="data/model/saved_model.lstmcrf.")
+    parser.add_argument('--savedset', help='Dir of saved data setting')
+    parser.add_argument('--train', default="data/conll03/train.bmes") 
+    parser.add_argument('--dev', default="data/conll03/dev.bmes" )  
+    parser.add_argument('--test', default="data/conll03/test.bmes") 
+    parser.add_argument('--seg', default="True") 
+    parser.add_argument('--raw') 
+    parser.add_argument('--loadmodel')
+    parser.add_argument('--output') 
+
+    args = parser.parse_args()
+    args.config = '../demo.train.config'
+    data = Data()
+    data.HP_gpu = torch.cuda.is_available()
+    if args.config == 'None':
+        data.train_dir = args.train 
+        data.dev_dir = args.dev 
+        data.test_dir = args.test
+        data.model_dir = args.savemodel
+        data.dset_dir = args.savedset
+        print("Save dset directory:",data.dset_dir)
+        save_model_dir = args.savemodel
+        data.word_emb_dir = args.wordemb
+        data.char_emb_dir = args.charemb
+        if args.seg.lower() == 'true':
+            data.seg = True
+        else:
+            data.seg = False
+    else:
+        data.read_config(args.config)
+    # data.show_data_summary()
+    status = data.status.lower()
+
+    if status == 'train':
+        print("MODEL: train")
+        # data_initialization(data)
+        data.initial_feature_alphabets()
+        data.build_alphabet(data.train_dir)
+        data.build_alphabet(data.dev_dir)
+        data.build_alphabet(data.test_dir)
+        data.fix_alphabet()
+        data.generate_instance('train')
+        data.generate_instance('dev')
+        data.generate_instance('test')
+        # data.build_pretrain_emb()
+        # train(data)
+    elif status == 'decode':
+        print("MODEL: decode")
+        data.load(data.dset_dir)
+        data.read_config(args.config)
+        print(data.raw_dir)
+        # exit(0)
+        data.show_data_summary()
+        # data.generate_instance('raw')
+        print("nbest: %s"%(data.nbest))
+        decode_results, pred_scores = load_model_decode(data, 'test')
+        if data.nbest and not data.sentence_classification:
+            data.write_nbest_decoded_results(decode_results, pred_scores, 'test')
+        else:
+            data.write_decoded_results(decode_results, 'test')
+    else:
+        print("Invalid argument! Please use valid arguments! (train/test/decode)")
+
+  

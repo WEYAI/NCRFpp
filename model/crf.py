@@ -417,22 +417,3 @@ class CRF(nn.Module):
         # exit(0)
         return path_score, decode_idx
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
