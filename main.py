@@ -15,9 +15,16 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from utils.metric import get_ner_fmeasure
+from utils.metric import get_pos_fmeasure
+from utils.metric import get_chunk_fmeasure
 from model.seqlabel import SeqLabel
 from model.sentclassifier import SentClassifier
 from utils.data import Data
+from seqeval.metrics import f1_score
+from seqeval.metrics import accuracy_score
+from seqeval.metrics import precision_score
+from seqeval.metrics import recall_score
+from seqeval.metrics import classification_report
 
 try:
     import cPickle as pickle
@@ -46,19 +53,39 @@ def predict_check(pred_variable, gold_variable, mask_variable, sentence_classifi
             gold_variable (batch_size, sent_len): gold result variable
             mask_variable (batch_size, sent_len): mask variable
     """
-    pred = pred_variable.cpu().data.numpy()
-    gold = gold_variable.cpu().data.numpy()
+    ner_pred_variable = pred_variable['ner_batch_seq'] 
+    pos_pred_variable = pred_variable['pos_batch_seq'] 
+    chunk_pred_variable = pred_variable['chunk_batch_seq'] 
+    ner_pred = ner_pred_variable.cpu().data.numpy()
+    pos_pred = pos_pred_variable.cpu().data.numpy()
+    chunk_pred = chunk_pred_variable.cpu().data.numpy()
+    ner_gold_variable = gold_variable['ner_batch_label'] 
+    pos_gold_variable = gold_variable['pos_batch_label'] 
+    chunk_gold_variable = gold_variable['chunk_batch_label'] 
+    ner_gold = ner_gold_variable.cpu().data.numpy()
+    pos_gold = pos_gold_variable.cpu().data.numpy()
+    chunk_gold = chunk_gold_variable.cpu().data.numpy()
     mask = mask_variable.cpu().data.numpy()
-    overlaped = (pred == gold)
-    if sentence_classification:
-        # print(overlaped)
-        # print(overlaped*pred)
-        right_token = np.sum(overlaped)
-        total_token = overlaped.shape[0] ## =batch_size
-    else:
-        right_token = np.sum(overlaped * mask)
-        total_token = mask.sum()
+    ner_overlaped = (ner_pred == ner_gold)
+    pos_overlaped = (pos_pred == pos_gold)
+    chunk_overlaped = (chunk_pred == chunk_gold)
+    ner_right_token = np.sum(ner_overlaped * mask)
+    ner_total_token = mask.sum()
+    pos_right_token = np.sum(pos_overlaped * mask)
+    pos_total_token = mask.sum()
+    chunk_right_token = np.sum(chunk_overlaped * mask)
+    chunk_total_token = mask.sum()
     # print("right: %s, total: %s"%(right_token, total_token))
+    right_token ={
+        "ner_right_token":ner_right_token, 
+        "pos_right_token":pos_right_token, 
+        "chunk_right_token":chunk_right_token, 
+    } 
+    total_token ={
+        "ner_total_token":ner_total_token, 
+        "pos_total_token":pos_total_token, 
+        "chunk_total_token":chunk_total_token, 
+    } 
     return right_token, total_token
 
 
@@ -144,12 +171,29 @@ def evaluate(data, model, name, nbest=None):
     else:
         print("Error: wrong evaluate name,", name)
         exit(1)
-    right_token = 0
-    whole_token = 0
-    nbest_pred_results = []
-    pred_scores = []
-    pred_results = []
-    gold_results = []
+    ner_right_token = 0
+    ner_whole_token = 0
+   
+    pos_right_token = 0
+    pos_whole_token = 0
+    
+    chunk_right_token = 0
+    chunk_whole_token = 0
+    
+    ner_nbest_pred_results = []
+    ner_pred_scores = []
+    ner_pred_results = []
+    ner_gold_results = []
+   
+    pos_nbest_pred_results = []
+    pos_pred_scores = []
+    pos_pred_results = []
+    pos_gold_results = []
+    
+    chunk_nbest_pred_results = []
+    chunk_pred_scores = []
+    chunk_pred_results = []
+    chunk_gold_results = []
     ## set model in eval model
     model.eval()
     batch_size = data.HP_batch_size
@@ -164,7 +208,7 @@ def evaluate(data, model, name, nbest=None):
         instance = instances[start:end]
         if not instance:
             continue
-        batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask  = batchify_with_label(instance, data.HP_gpu, False, data.sentence_classification)
+        batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask  = batchify_with_label(instance, data.HP_gpu, False)
         if nbest and not data.sentence_classification:
             scores, nbest_tag_seq = model.decode_nbest(batch_word,batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, mask, nbest)
             nbest_pred_result = recover_nbest_label(nbest_tag_seq, mask, data.label_alphabet, batch_wordrecover)
@@ -175,21 +219,61 @@ def evaluate(data, model, name, nbest=None):
         else:
             tag_seq = model(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, mask)
         # print("tag:",tag_seq)
-        pred_label, gold_label = recover_label(tag_seq, batch_label, mask, data.label_alphabet, batch_wordrecover, data.sentence_classification)
-        pred_results += pred_label
-        gold_results += gold_label
+        ner_batch_label = batch_label['ner_batch_label']
+        pos_batch_label = batch_label['pos_batch_label']
+        chunk_batch_label = batch_label['chunk_batch_label']
+        ner_tag_seq = tag_seq["ner_tag_seq"]
+        pos_tag_seq = tag_seq["pos_tag_seq"]
+        chunk_tag_seq = tag_seq["chunk_tag_seq"]
+        ner_pred_label, ner_gold_label = recover_label(ner_tag_seq, ner_batch_label, mask, data.ner_label_alphabet, batch_wordrecover, data.sentence_classification)
+        pos_pred_label, pos_gold_label = recover_label(pos_tag_seq, pos_batch_label, mask, data.pos_label_alphabet, batch_wordrecover, data.sentence_classification)
+        chunk_pred_label, chunk_gold_label = recover_label(chunk_tag_seq, chunk_batch_label, mask, data.chunk_label_alphabet, batch_wordrecover, data.sentence_classification)
+        ner_pred_results += ner_pred_label
+        ner_gold_results += ner_gold_label
+        pos_pred_results += pos_pred_label
+        pos_gold_results += pos_gold_label
+        chunk_pred_results += chunk_pred_label
+        chunk_gold_results += chunk_gold_label
     decode_time = time.time() - start_time
     speed = len(instances)/decode_time
-    acc, p, r, f = get_ner_fmeasure(gold_results, pred_results, data.tagScheme)
-    if nbest and not data.sentence_classification:
-        return speed, acc, p, r, f, nbest_pred_results, pred_scores
-    return speed, acc, p, r, f, pred_results, pred_scores
+    ner_acc, ner_p, ner_r, ner_f = get_ner_fmeasure(ner_gold_results, ner_pred_results, data.tagScheme)
+    pos_acc, pos_p, pos_r, pos_f = get_pos_fmeasure(pos_gold_results, pos_pred_results)
+    chunk_acc, chunk_p, chunk_r, chunk_f = get_chunk_fmeasure(chunk_gold_results, chunk_pred_results,data.tagScheme)
+    acc = {
+        "ner_acc":ner_acc,
+        "pos_acc":pos_acc,
+        "chunk_acc":chunk_acc,
+    }
+    p = {
+        "ner_p":ner_p,
+        "pos_p":pos_p,
+        "chunk_p":chunk_p,
+    }
+    r = {
+        "ner_r":ner_r,
+        "pos_r":pos_r,
+        "chunk_r":chunk_r,
+    }
+
+    f = {
+        "ner_f":ner_f,
+        "pos_f":pos_f,
+        "chunk_f":chunk_f,
+    }
+    pred_scores= {
+        "ner_pred_scores":ner_pred_scores,
+        "pos_pred_scores":pos_pred_scores,
+        "chunk_pred_scores":chunk_pred_scores
+    }
+    pred_results= {
+        "ner_pred_results":ner_pred_results,
+        "pos_pred_results":pos_pred_results,
+        "chunk_pred_results":chunk_pred_results
+    }
+    return speed, acc, p, r, f, pred_results,pred_scores
 
 
-def batchify_with_label(input_batch_list, gpu, if_train=True, sentence_classification=False):
-    if sentence_classification:
-        return batchify_sentence_classification_with_label(input_batch_list, gpu, if_train)
-    else:
+def batchify_with_label(input_batch_list, gpu, if_train=True):
         return batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train)
 
 
@@ -217,19 +301,25 @@ def batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train=True):
     features = [np.asarray(sent[1]) for sent in input_batch_list]
     feature_num = len(features[0][0])
     chars = [sent[2] for sent in input_batch_list]
-    labels = [sent[3] for sent in input_batch_list]
+    ner_labels = [sent[3] for sent in input_batch_list]
+    pos_labels = [sent[4] for sent in input_batch_list]
+    chunk_labels = [sent[5] for sent in input_batch_list]
     word_seq_lengths = torch.LongTensor(list(map(len, words)))
     max_seq_len = word_seq_lengths.max().item()
     word_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
-    label_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
+    ner_label_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
+    pos_label_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
+    chunk_label_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
     feature_seq_tensors = []
     for idx in range(feature_num):
         feature_seq_tensors.append(torch.zeros((batch_size, max_seq_len),requires_grad =  if_train).long())
     mask = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).bool()
-    for idx, (seq, label, seqlen) in enumerate(zip(words, labels, word_seq_lengths)):
+    for idx, (seq, ner_label,pos_label,chunk_label, seqlen) in enumerate(zip(words, ner_labels,pos_labels,chunk_labels, word_seq_lengths)):
         seqlen = seqlen.item()
         word_seq_tensor[idx, :seqlen] = torch.LongTensor(seq)
-        label_seq_tensor[idx, :seqlen] = torch.LongTensor(label)
+        ner_label_seq_tensor[idx, :seqlen] = torch.LongTensor(ner_label)
+        pos_label_seq_tensor[idx, :seqlen] = torch.LongTensor(pos_label)
+        chunk_label_seq_tensor[idx, :seqlen] = torch.LongTensor(chunk_label)
         mask[idx, :seqlen] = torch.Tensor([1]*seqlen)
         for idy in range(feature_num):
             feature_seq_tensors[idy][idx,:seqlen] = torch.LongTensor(features[idx][:,idy])
@@ -238,7 +328,9 @@ def batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train=True):
     for idx in range(feature_num):
         feature_seq_tensors[idx] = feature_seq_tensors[idx][word_perm_idx]
 
-    label_seq_tensor = label_seq_tensor[word_perm_idx]
+    ner_label_seq_tensor = ner_label_seq_tensor[word_perm_idx]
+    pos_label_seq_tensor = pos_label_seq_tensor[word_perm_idx]
+    chunk_label_seq_tensor = chunk_label_seq_tensor[word_perm_idx]
     mask = mask[word_perm_idx]
     ### deal with char
     # pad_chars (batch_size, max_seq_len)
@@ -264,11 +356,18 @@ def batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train=True):
             feature_seq_tensors[idx] = feature_seq_tensors[idx].cuda()
         word_seq_lengths = word_seq_lengths.cuda()
         word_seq_recover = word_seq_recover.cuda()
-        label_seq_tensor = label_seq_tensor.cuda()
+        ner_label_seq_tensor = ner_label_seq_tensor.cuda()
+        pos_label_seq_tensor = pos_label_seq_tensor.cuda()
+        chunk_label_seq_tensor = chunk_label_seq_tensor.cuda()
         char_seq_tensor = char_seq_tensor.cuda()
         char_seq_recover = char_seq_recover.cuda()
         mask = mask.cuda()
-    return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, label_seq_tensor, mask
+        batch_labels_seq_tensor = {
+            "ner_batch_label":ner_label_seq_tensor,
+            "pos_batch_label":pos_label_seq_tensor,
+            "chunk_batch_label":chunk_label_seq_tensor
+        }
+    return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, batch_labels_seq_tensor, mask
 
 
 def batchify_sentence_classification_with_label(input_batch_list, gpu, if_train=True):
@@ -347,7 +446,7 @@ def batchify_sentence_classification_with_label(input_batch_list, gpu, if_train=
         char_seq_tensor = char_seq_tensor.cuda()
         char_seq_recover = char_seq_recover.cuda()
         mask = mask.cuda()
-    return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, label_seq_tensor, mask
+    return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, labels_seq_tensor, mask
 
 
 
@@ -357,10 +456,7 @@ def train(data):
     data.show_data_summary()
     save_data_name = data.model_dir +".dset"
     data.save(save_data_name)
-    if data.sentence_classification:
-        model = SentClassifier(data)
-    else:
-        model = SeqLabel(data)
+    model = SeqLabel(data)
 
     if data.optimizer.lower() == "sgd":
         optimizer = optim.SGD(model.parameters(), lr=data.HP_lr, momentum=data.HP_momentum,weight_decay=data.HP_l2)
@@ -388,8 +484,12 @@ def train(data):
         sample_id = 0
         sample_loss = 0
         total_loss = 0
-        right_token = 0
-        whole_token = 0
+        ner_right_token = 0
+        ner_whole_token = 0
+        pos_right_token = 0
+        pos_whole_token = 0
+        chunk_right_token = 0
+        chunk_whole_token = 0
         random.shuffle(data.train_Ids)
         print("Shuffle: first input word list:", data.train_Ids[0][0])
         ## set model in train model
@@ -407,20 +507,32 @@ def train(data):
             instance = data.train_Ids[start:end]
             if not instance:
                 continue
-            batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask  = batchify_with_label(instance, data.HP_gpu, True, data.sentence_classification)
+            batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask  = batchify_with_label(instance, data.HP_gpu, True)
             instance_count += 1
             loss, tag_seq = model.calculate_loss(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, batch_label, mask)
             right, whole = predict_check(tag_seq, batch_label, mask, data.sentence_classification)
-            right_token += right
-            whole_token += whole
+            ner_right = right["ner_right_token"] 
+            pos_right = right["pos_right_token"] 
+            chunk_right = right["chunk_right_token"] 
+            ner_whole = whole["ner_total_token"] 
+            pos_whole = whole["pos_total_token"] 
+            chunk_whole = whole["chunk_total_token"] 
+            ner_right_token += ner_right
+            ner_whole_token += ner_whole
+            pos_right_token += pos_right
+            pos_whole_token += pos_whole
+            chunk_right_token += chunk_right
+            chunk_whole_token += chunk_whole
             # print("loss:",loss.item())
             sample_loss += loss.item()
             total_loss += loss.item()
             if end%500 == 0:
                 temp_time = time.time()
                 temp_cost = temp_time - temp_start
-                temp_start = temp_time
-                print("     Instance: %s; Time: %.2fs; loss: %.4f; acc: %s/%s=%.4f"%(end, temp_cost, sample_loss, right_token, whole_token,(right_token+0.)/whole_token))
+                temp_start = temp_time 
+                print("     Instance: %s; Time: %.2fs; loss: %.4f; ner_acc: %s/%s=%.4f"%(end, temp_cost, sample_loss, ner_right_token, ner_whole_token,(ner_right_token+0.)/ner_whole_token))
+                print("     Instance: %s; Time: %.2fs; loss: %.4f; pos_acc: %s/%s=%.4f"%(end, temp_cost, sample_loss, pos_right_token, pos_whole_token,(pos_right_token+0.)/pos_whole_token))
+                print("     Instance: %s; Time: %.2fs; loss: %.4f; chunk_acc: %s/%s=%.4f"%(end, temp_cost, sample_loss, chunk_right_token, chunk_whole_token,(chunk_right_token+0.)/chunk_whole_token))
                 if sample_loss > 1e8 or str(sample_loss) == "nan":
                     print("ERROR: LOSS EXPLOSION (>1e8) ! PLEASE SET PROPER PARAMETERS AND STRUCTURE! EXIT....")
                     exit(1)
@@ -431,7 +543,9 @@ def train(data):
             model.zero_grad()
         temp_time = time.time()
         temp_cost = temp_time - temp_start
-        print("     Instance: %s; Time: %.2fs; loss: %.4f; acc: %s/%s=%.4f"%(end, temp_cost, sample_loss, right_token, whole_token,(right_token+0.)/whole_token))
+        print("     Instance: %s; Time: %.2fs; ner_loss: %.4f; ner_acc: %s/%s=%.4f"%(end, temp_cost, sample_loss, ner_right_token, ner_whole_token,(ner_right_token+0.)/ner_whole_token))
+        print("     Instance: %s; Time: %.2fs; pos_loss: %.4f; acc: %s/%s=%.4f"%(end, temp_cost, sample_loss, pos_right_token, pos_whole_token,(pos_right_token+0.)/pos_whole_token))
+        print("     Instance: %s; Time: %.2fs; chunk_loss: %.4f; acc: %s/%s=%.4f"%(end, temp_cost, sample_loss, chunk_right_token, chunk_whole_token,(chunk_right_token+0.)/chunk_whole_token))
 
         epoch_finish = time.time()
         epoch_cost = epoch_finish - epoch_start
@@ -446,8 +560,11 @@ def train(data):
         dev_cost = dev_finish - epoch_finish
 
         if data.seg:
-            current_score = f
-            print("Dev: time: %.2fs, speed: %.2fst/s; acc: %.4f, p: %.4f, r: %.4f, f: %.4f"%(dev_cost, speed, acc, p, r, f))
+            # current_score = f
+            current_score = f["chunk_f"] + f["ner_f"] + acc["pos_acc"]
+            print("Dev: time: %.2fs, speed: %.2fst/s; ner_acc: %.4f, ner_p: %.4f, ner_r: %.4f, ner_f: %.4f"%(dev_cost, speed, acc["ner_acc"], p["ner_p"], r["ner_r"], f["ner_f"]))
+            print("Dev: time: %.2fs, speed: %.2fst/s; pos_acc: %.4f, pos_p: %.4f, pos_r: %.4f, pos_f: %.4f"%(dev_cost, speed, acc["pos_acc"], p["pos_p"], r["pos_r"], f["pos_f"]))
+            print("Dev: time: %.2fs, speed: %.2fst/s; chunk_acc: %.4f, chunk_p: %.4f, chunk_r: %.4f, chunk_f: %.4f"%(dev_cost, speed, acc["chunk_acc"], p["chunk_p"], r["chunk_r"], f["chunk_f"]))
         else:
             current_score = acc
             print("Dev: time: %.2fs speed: %.2fst/s; acc: %.4f"%(dev_cost, speed, acc))
@@ -466,7 +583,10 @@ def train(data):
         test_finish = time.time()
         test_cost = test_finish - dev_finish
         if data.seg:
-            print("Test: time: %.2fs, speed: %.2fst/s; acc: %.4f, p: %.4f, r: %.4f, f: %.4f"%(test_cost, speed, acc, p, r, f))
+            # print("Test: time: %.2fs, speed: %.2fst/s; acc: %.4f, p: %.4f, r: %.4f, f: %.4f"%(test_cost, speed, acc, p, r, f))
+            print("Test: time: %.2fs, speed: %.2fst/s; ner_acc: %.4f, ner_p: %.4f, ner_r: %.4f, ner_f: %.4f"%(test_cost, speed, acc["ner_acc"], p["ner_p"], r["ner_r"], f["ner_f"]))
+            print("Test: time: %.2fs, speed: %.2fst/s; pos_acc: %.4f, pos_p: %.4f, pos_r: %.4f, pos_f: %.4f"%(test_cost, speed, acc["pos_acc"], p["pos_p"], r["pos_r"], f["pos_f"]))
+            print("Test: time: %.2fs, speed: %.2fst/s; chunk_acc: %.4f, chunk_p: %.4f, chunk_r: %.4f, chunk_f: %.4f"%(test_cost, speed, acc["chunk_acc"], p["chunk_p"], r["chunk_r"], f["chunk_f"]))
         else:
             print("Test: time: %.2fs, speed: %.2fst/s; acc: %.4f"%(test_cost, speed, acc))
         gc.collect()
@@ -526,9 +646,9 @@ if __name__ == '__main__':
     data = Data()
     data.HP_gpu = torch.cuda.is_available()
     if args.config == 'None':
-        data.train_dir = args.train 
-        data.dev_dir = args.dev 
-        data.test_dir = args.test
+        data.train_dir_ner = args.train 
+        data.dev_dir_ner = args.dev 
+        data.test_dir_ner = args.test
         data.model_dir = args.savemodel
         data.dset_dir = args.savedset
         print("Save dset directory:",data.dset_dir)

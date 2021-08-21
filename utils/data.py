@@ -34,16 +34,22 @@ class Data:
         self.number_normalized = True
         self.norm_word_emb = False
         self.norm_char_emb = False
+        
         self.word_alphabet = Alphabet('word')
         self.char_alphabet = Alphabet('character')
-
+        
+        # self.word_alphabet_pos = Alphabet('word')
+        # self.char_alphabet_pos = Alphabet('character')
+        
         self.feature_name = []
         self.feature_alphabets = []
         self.feature_num = len(self.feature_alphabets)
         self.feat_config = None
 
 
-        self.label_alphabet = Alphabet('label',True)
+        self.ner_label_alphabet = Alphabet('ner_label',True)
+        self.pos_label_alphabet = Alphabet('pos_label',True)
+        self.chunk_label_alphabet = Alphabet('chunk_label',True)
         self.tagScheme = "NoSeg" ## BMES/BIO
         self.split_token = ' ||| '
         self.seg = True
@@ -52,6 +58,9 @@ class Data:
         self.train_dir = None
         self.dev_dir = None
         self.test_dir = None
+        self.pos_train_dir = None
+        self.pos_dev_dir = None
+        self.pos_test_dir = None
         self.raw_dir = None
 
         self.decode_dir = None
@@ -77,10 +86,14 @@ class Data:
         self.pretrain_char_embedding = None
         self.pretrain_feature_embeddings = []
 
-        self.label_size = 0
+        self.ner_label_size = 0
+        self.pos_label_size = 0
+        self.chunk_label_size = 0
         self.word_alphabet_size = 0
         self.char_alphabet_size = 0
-        self.label_alphabet_size = 0
+        self.ner_label_alphabet_size = 0
+        self.pos_label_alphabet_size = 0
+        self.chunk_label_alphabet_size = 0
         self.feature_alphabet_sizes = []
         self.feature_emb_dims = []
         self.norm_feature_embs = []
@@ -131,7 +144,9 @@ class Data:
         print("     Number   normalized: %s"%(self.number_normalized))
         print("     Word  alphabet size: %s"%(self.word_alphabet_size))
         print("     Char  alphabet size: %s"%(self.char_alphabet_size))
-        print("     Label alphabet size: %s"%(self.label_alphabet_size))
+        print("     Label alphabet size: %s"%(self.ner_label_alphabet_size))
+        print("     Label alphabet size: %s"%(self.pos_label_alphabet_size))
+        print("     Label alphabet size: %s"%(self.chunk_label_alphabet_size))
         print("     Word embedding  dir: %s"%(self.word_emb_dir))
         print("     Char embedding  dir: %s"%(self.char_emb_dir))
         print("     Word embedding size: %s"%(self.word_emb_dim))
@@ -223,51 +238,45 @@ class Data:
         in_lines = open(input_file,'r').readlines()
         for line in in_lines:
             if len(line) > 2:
-                ## if sentence classification data format, splited by \t
-                if self.sentence_classification:
-                    pairs = line.strip().split(self.split_token)
-                    sent = pairs[0]
-                    if sys.version_info[0] < 3:
-                        sent = sent.decode('utf-8')
-                    words = sent.split()
-                    for word in words:
-                        if self.number_normalized:
-                            word = normalize_word(word)
-                        self.word_alphabet.add(word)
-                        for char in word:
-                            self.char_alphabet.add(char)
-                    label = pairs[-1]
-                    self.label_alphabet.add(label)
-                    ## build feature alphabet
-                    for idx in range(self.feature_num):
-                        feat_idx = pairs[idx+1].split(']',1)[-1]
-                        self.feature_alphabets[idx].add(feat_idx)
-
                 ## if sequence labeling data format i.e. CoNLL 2003
-                else:
                     pairs = line.strip().split()
                     word = pairs[0]
+                    if word == '-DOCSTART-': 
+                    # print("clear dirty data") # clear dirty data
+                        continue
                     if sys.version_info[0] < 3:
                         word = word.decode('utf-8')
                     if self.number_normalized:
                         word = normalize_word(word)
-                    label = pairs[-1]
-                    self.label_alphabet.add(label)
-                    self.word_alphabet.add(word)
+                    ner_label = pairs[3]
+                    pos_label = pairs[1]
+                    chunk_label = pairs[2]
+                    self.ner_label_alphabet.add(ner_label)
+                    self.pos_label_alphabet.add(pos_label)
+                    self.chunk_label_alphabet.add(chunk_label)
+
                     ## build feature alphabet
                     for idx in range(self.feature_num):
                         feat_idx = pairs[idx+1].split(']',1)[-1]
                         self.feature_alphabets[idx].add(feat_idx)
                     for char in word:
                         self.char_alphabet.add(char)
+                    
         self.word_alphabet_size = self.word_alphabet.size()
         self.char_alphabet_size = self.char_alphabet.size()
-        self.label_alphabet_size = self.label_alphabet.size()
+        self.pos_label_alphabet_size = self.pos_label_alphabet.size()
+        self.chunk_label_alphabet_size = self.chunk_label_alphabet.size()
+        self.ner_label_alphabet_size = self.ner_label_alphabet.size()
         for idx in range(self.feature_num):
             self.feature_alphabet_sizes[idx] = self.feature_alphabets[idx].size()
         startS = False
         startB = False
-        for label,_ in self.label_alphabet.iteritems():
+        for label,_ in self.ner_label_alphabet.iteritems():
+            if "S-" in label.upper():
+                startS = True
+            elif "B-" in label.upper():
+                startB = True
+        for label,_ in self.chunk_label_alphabet.iteritems():
             if "S-" in label.upper():
                 startS = True
             elif "B-" in label.upper():
@@ -284,7 +293,9 @@ class Data:
     def fix_alphabet(self):
         self.word_alphabet.close()
         self.char_alphabet.close()
-        self.label_alphabet.close()
+        self.ner_label_alphabet.close()
+        self.chunk_label_alphabet.close()
+        self.pos_label_alphabet.close()
         for idx in range(self.feature_num):
             self.feature_alphabets[idx].close()
 
@@ -306,13 +317,13 @@ class Data:
     def generate_instance(self, name):
         self.fix_alphabet()
         if name == "train":
-            self.train_texts, self.train_Ids = read_instance(self.train_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
+            self.train_texts, self.train_Ids = read_instance(self.train_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.ner_label_alphabet,self.pos_label_alphabet,self.chunk_label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
         elif name == "dev":
-            self.dev_texts, self.dev_Ids = read_instance(self.dev_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
+            self.dev_texts, self.dev_Ids = read_instance(self.dev_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.ner_label_alphabet,self.pos_label_alphabet,self.chunk_label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
         elif name == "test":
-            self.test_texts, self.test_Ids = read_instance(self.test_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
+            self.test_texts, self.test_Ids = read_instance(self.test_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.ner_label_alphabet,self.pos_label_alphabet,self.chunk_label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
         elif name == "raw":
-            self.raw_texts, self.raw_Ids = read_instance(self.raw_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
+            self.raw_texts, self.raw_Ids = read_instance(self.raw_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.ner_label_alphabet, self.pos_label_alphabet,self.chunk_label_alphabet,self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
         else:
             print("Error: you can only generate train/dev/test instance! Illegal input:%s"%(name))
 
@@ -380,7 +391,7 @@ class Data:
         for idx in range(sent_num):
             sent_length = len(predict_results[idx][0])
             nbest = len(predict_results[idx])
-            score_string = "# "
+            score_string = "#"
             for idz in range(nbest):
                 score_string += format(pred_scores[idx][idz], '.4f')+" "
             fout.write(score_string.strip() + "\n")
@@ -647,8 +658,11 @@ if __name__ == '__main__':
         data.generate_instance('train')
         data.generate_instance('dev')
         data.generate_instance('test')
+        print(data.chunk_label_alphabet.instance2index)
+        print(data.pos_label_alphabet.instance2index)
+        print(data.ner_label_alphabet.instance2index)
         # data.build_pretrain_emb()
-        # train(data)
+        train(data)
     elif status == 'decode':
         print("MODEL: decode")
         data.load(data.dset_dir)

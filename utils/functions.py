@@ -18,7 +18,7 @@ def normalize_word(word):
     return new_word
 
 
-def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, label_alphabet, number_normalized, max_sent_length, sentence_classification=False, split_token='\t', char_padding_size=-1, char_padding_symbol = '</pad>'):
+def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, ner_label_alphabet,pos_label_alphabet,chunk_label_alphabet, number_normalized, max_sent_length, sentence_classification=False, split_token='\t', char_padding_size=-1, char_padding_symbol = '</pad>'):
     feature_num = len(feature_alphabets)
     in_lines = open(input_file,'r', encoding="utf8").readlines()
     instence_texts = []
@@ -26,87 +26,39 @@ def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, l
     words = []
     features = []
     chars = []
-    labels = []
+    ner_labels = []
+    pos_labels = []
+    chunk_labels = []
     word_Ids = []
     feature_Ids = []
     char_Ids = []
-    label_Ids = []
-
-    ## if sentence classification data format, splited by \t
-    if sentence_classification:
-        for line in in_lines:
-            if len(line) > 2:
-                pairs = line.strip().split(split_token)
-                sent = pairs[0]
-                if sys.version_info[0] < 3:
-                    sent = sent.decode('utf-8')
-                original_words = sent.split()
-                for word in original_words:
-                    words.append(word)
-                    if number_normalized:
-                        word = normalize_word(word)
-                    word_Ids.append(word_alphabet.get_index(word))
-                    ## get char
-                    char_list = []
-                    char_Id = []
-                    for char in word:
-                        char_list.append(char)
-                    if char_padding_size > 0:
-                        char_number = len(char_list)
-                        if char_number < char_padding_size:
-                            char_list = char_list + [char_padding_symbol]*(char_padding_size-char_number)
-                        assert(len(char_list) == char_padding_size)
-                    for char in char_list:
-                        char_Id.append(char_alphabet.get_index(char))
-                    chars.append(char_list)
-                    char_Ids.append(char_Id)
-
-                label = pairs[-1]
-                label_Id = label_alphabet.get_index(label)
-                ## get features
-                feat_list = []
-                feat_Id = []
-                for idx in range(feature_num):
-                    feat_idx = pairs[idx+1].split(']',1)[-1]
-                    feat_list.append(feat_idx)
-                    feat_Id.append(feature_alphabets[idx].get_index(feat_idx))
-                ## combine together and return, notice the feature/label as different format with sequence labeling task
-                if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)):
-                    instence_texts.append([words, feat_list, chars, label])
-                    instence_Ids.append([word_Ids, feat_Id, char_Ids,label_Id])
-                words = []
-                features = []
-                chars = []
-                char_Ids = []
-                word_Ids = []
-                feature_Ids = []
-                label_Ids = []
-        if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
-            instence_texts.append([words, feat_list, chars, label])
-            instence_Ids.append([word_Ids, feat_Id, char_Ids,label_Id])
-            words = []
-            features = []
-            chars = []
-            char_Ids = []
-            word_Ids = []
-            feature_Ids = []
-            label_Ids = []
-
-    else:
+    ner_label_Ids = []
+    pos_label_Ids = []
+    chunk_label_Ids = []
     ### for sequence labeling data format i.e. CoNLL 2003
-        for line in in_lines:
+    for line in in_lines:
             if len(line) > 2:
+                
                 pairs = line.strip().split()
                 word = pairs[0]
+                if word == '-DOCSTART-': 
+                    # print("clear dirty data") # clear dirty data
+                    continue
                 if sys.version_info[0] < 3:
                     word = word.decode('utf-8')
                 words.append(word)
                 if number_normalized:
                     word = normalize_word(word)
-                label = pairs[-1]
-                labels.append(label)
+                ner_label = pairs[3]
+                pos_label = pairs[1]
+                chunk_label = pairs[2]
+                ner_labels.append(ner_label)
+                pos_labels.append(pos_label)
+                chunk_labels.append(chunk_label)
                 word_Ids.append(word_alphabet.get_index(word))
-                label_Ids.append(label_alphabet.get_index(label))
+                ner_label_Ids.append(ner_label_alphabet.get_index(ner_label))
+                pos_label_Ids.append(pos_label_alphabet.get_index(pos_label))
+                chunk_label_Ids.append(chunk_label_alphabet.get_index(chunk_label))
                 ## get features
                 feat_list = []
                 feat_Id = []
@@ -135,28 +87,38 @@ def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, l
                 char_Ids.append(char_Id)
             else:
                 if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
-                    instence_texts.append([words, features, chars, labels])
-                    instence_Ids.append([word_Ids, feature_Ids, char_Ids,label_Ids])
+                    instence_texts.append([words, features, chars, ner_labels,pos_labels,chunk_labels])
+                    instence_Ids.append([word_Ids, feature_Ids, char_Ids,ner_label_Ids,pos_label_Ids,chunk_label_Ids])
                 words = []
                 features = []
                 chars = []
-                labels = []
+                ner_labels = []
+                pos_labels = []
+                chunk_labels = []
+                 
                 word_Ids = []
                 feature_Ids = []
                 char_Ids = []
-                label_Ids = []
-        if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
-            instence_texts.append([words, features, chars, labels])
-            instence_Ids.append([word_Ids, feature_Ids, char_Ids,label_Ids])
-            words = []
-            features = []
-            chars = []
-            labels = []
-            word_Ids = []
-            feature_Ids = []
-            char_Ids = []
-            label_Ids = []
+                ner_label_Ids = []
+                pos_label_Ids = []
+                chunk_label_Ids = []
+    if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
+                instence_texts.append([words, features, chars, ner_labels,pos_labels,chunk_labels])
+                instence_Ids.append([word_Ids, feature_Ids, char_Ids,ner_label_Ids,pos_label_Ids,chunk_label_Ids])
+                words = []
+                features = []
+                chars = []
+                ner_labels = []
+                pos_labels = []
+                chunk_labels = []
+                word_Ids = []
+                feature_Ids = []
+                char_Ids = []
+                ner_label_Ids = []
+                pos_label_Ids = []
+                chunk_label_Ids = []
     return instence_texts, instence_Ids
+    pass
 
 
 def build_pretrain_embedding(embedding_path, word_alphabet, embedd_dim=100, norm=True):

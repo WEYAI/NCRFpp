@@ -47,7 +47,7 @@ def predict_check(pred_variable, gold_variable, mask_variable):
             gold_variable (batch_size, sent_len): gold result variable
             mask_variable (batch_size, sent_len): mask variable
     """
-    pred = pred_variable.cpu().data.numpy()
+    pred = pred_variabl.cpu().data.numpy()
     gold = gold_variable.cpu().data.numpy()
     mask = mask_variable.cpu().data.numpy()
     overlaped = (pred == gold)

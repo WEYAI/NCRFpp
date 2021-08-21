@@ -58,11 +58,15 @@ class WordSequence(nn.Module):
                 self.cnn_drop_list.append(nn.Dropout(data.HP_dropout))
                 self.cnn_batchnorm_list.append(nn.BatchNorm1d(data.HP_hidden_dim))
         # The linear layer that maps from hidden state space to tag space
-        self.hidden2tag = nn.Linear(data.HP_hidden_dim, data.label_alphabet_size)
+        self.ner_hidden2tag = nn.Linear(data.HP_hidden_dim, data.ner_label_alphabet_size)
+        self.pos_hidden2tag = nn.Linear(data.HP_hidden_dim, data.pos_label_alphabet_size)
+        self.chunk_hidden2tag = nn.Linear(data.HP_hidden_dim, data.chunk_label_alphabet_size)
 
         if self.gpu:
             self.droplstm = self.droplstm.cuda()
-            self.hidden2tag = self.hidden2tag.cuda()
+            self.ner_hidden2tag = self.ner_hidden2tag.cuda()
+            self.pos_hidden2tag = self.pos_hidden2tag.cuda()
+            self.chunk_hidden2tag = self.chunk_hidden2tag.cuda()
             if self.word_feature_extractor == "CNN":
                 self.word2cnn = self.word2cnn.cuda()
                 for idx in range(self.cnn_layer):
@@ -108,7 +112,14 @@ class WordSequence(nn.Module):
             ## lstm_out (seq_len, seq_len, hidden_size)
             feature_out = self.droplstm(lstm_out.transpose(1,0))
         ## feature_out (batch_size, seq_len, hidden_size)
-        outputs = self.hidden2tag(feature_out)
+        ner_outputs = self.ner_hidden2tag(feature_out)
+        pos_outputs = self.pos_hidden2tag(feature_out)
+        chunk_outputs = self.chunk_hidden2tag(feature_out)
+        outputs = {
+            "ner_outputs":ner_outputs,
+            "pos_outputs":pos_outputs,
+            "chunk_outputs":chunk_outputs
+        }
         return outputs
 
     def sentence_representation(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover):
